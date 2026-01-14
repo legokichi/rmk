@@ -380,6 +380,11 @@ async fn run_peripheral_manager<
             )
             .await?;
         info!("Message to central found");
+        info!(
+            "[split central] message_to_central handle=0x{:x} cccd=0x{:x}",
+            message_to_central.handle,
+            message_to_central.cccd_handle.unwrap_or(0)
+        );
         let message_to_peripheral = client
             .characteristic_by_uuid::<[u8; SPLIT_MESSAGE_MAX_SIZE]>(
                 service,
