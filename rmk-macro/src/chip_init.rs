@@ -181,8 +181,16 @@ pub(crate) fn chip_init_default(keyboard_config: &KeyboardTomlConfig, peripheral
                     static STATE: ::static_cell::StaticCell<::cyw43::State> = ::static_cell::StaticCell::new();
                     let state = STATE.init(::cyw43::State::new());
                     let (_net_device, bt_device, mut control, runner) = ::cyw43::new_with_bluetooth(state, pwr, spi, fw, btfw).await;
+                    ::defmt::info!(
+                        "[cyw43] fw_len={} clm_len={} btfw_len={}",
+                        fw.len(),
+                        clm.len(),
+                        btfw.len()
+                    );
+                    ::defmt::info!("[cyw43] new_with_bluetooth done");
                     spawner.spawn(cyw43_task(runner)).unwrap();
                     control.init(clm).await;
+                    ::defmt::info!("[cyw43] control.init done");
 
                     let controller: ::bt_hci::controller::ExternalController<_, 10> = ::bt_hci::controller::ExternalController::new(bt_device);
                     let ble_addr = #ble_addr;

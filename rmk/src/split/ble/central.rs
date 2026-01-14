@@ -392,6 +392,18 @@ async fn run_peripheral_manager<
             .await?;
         info!("Subscribing notifications");
         let listener = client.subscribe(&message_to_central, false).await?;
+        info!(
+            "[split central] notif_qsize={}",
+            trouble_host::config::GATT_CLIENT_NOTIFICATION_QUEUE_SIZE
+        );
+        info!(
+            "[split central] pool_size={} mtu={} l2cap_rxq={} l2cap_txq={} conn_ev_qsize={}",
+            trouble_host::config::DEFAULT_PACKET_POOL_SIZE,
+            trouble_host::config::DEFAULT_PACKET_POOL_MTU,
+            trouble_host::config::L2CAP_RX_QUEUE_SIZE,
+            trouble_host::config::L2CAP_TX_QUEUE_SIZE,
+            trouble_host::config::CONNECTION_EVENT_QUEUE_SIZE
+        );
         let split_ble_driver = BleSplitCentralDriver::new(listener, message_to_peripheral, client);
         let peripheral_manager = PeripheralManager::<ROW, COL, ROW_OFFSET, COL_OFFSET, _>::new(split_ble_driver, id);
         peripheral_manager.run().await;
@@ -437,7 +449,13 @@ impl<'a, 'b, 'c, C: Controller + ControllerCmdAsync<LeSetPhy>, P: PacketPool> Sp
 {
     async fn read(&mut self) -> Result<SplitMessage, SplitDriverError> {
         let data = self.listener.next().await;
-        let message = postcard::from_bytes(data.as_ref()).map_err(|_| SplitDriverError::DeserializeError)?;
+        let raw = data.as_ref();
+        info!(
+            "[split central] raw bytes len={} bytes={:?}",
+            raw.len(),
+            raw
+        );
+        let message = postcard::from_bytes(raw).map_err(|_| SplitDriverError::DeserializeError)?;
         info!("Received split message: {:?}", message);
 
         // Update last activity time when receiving key events from peripheral

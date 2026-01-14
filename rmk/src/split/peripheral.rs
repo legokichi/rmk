@@ -125,6 +125,11 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                     }
                 },
                 embassy_futures::select::Either3::Second(e) => {
+                    info!(
+                        "[split peri] key_event={:?} conn={}",
+                        e,
+                        CONNECTION_STATE.load(core::sync::atomic::Ordering::Acquire)
+                    );
                     // Only send the key event if the connection is established
                     if CONNECTION_STATE.load(core::sync::atomic::Ordering::Acquire) {
                         debug!("Writing split key event to central");

@@ -95,6 +95,15 @@ impl<
                             self.key_states[row_idx][col_idx].toggle_pressed();
                             let key_state = self.key_states[row_idx][col_idx];
 
+                            info!(
+                                "[direct_pin] row={} col={} pin_state={} low_active={} pressed={}",
+                                row_idx,
+                                col_idx,
+                                pin_state,
+                                self.low_active,
+                                key_state.pressed
+                            );
+
                             self.scan_pos = (row_idx, col_idx);
                             return Event::Key(KeyboardEvent::key(row_idx as u8, col_idx as u8, key_state.pressed));
                         }

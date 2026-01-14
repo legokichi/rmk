@@ -112,11 +112,29 @@ impl<'stack, 'server, 'c, P: PacketPool> SplitReader for BleSplitPeripheralDrive
 impl<'stack, 'server, 'c, P: PacketPool> SplitWriter for BleSplitPeripheralDriver<'stack, 'server, 'c, P> {
     async fn write(&mut self, message: &SplitMessage) -> Result<usize, SplitDriverError> {
         let mut buf = [0_u8; SPLIT_MESSAGE_MAX_SIZE];
-        postcard::to_slice(message, &mut buf).map_err(|e| {
+        let used = postcard::to_slice(message, &mut buf).map_err(|e| {
             error!("Postcard serialize split message error: {}", e);
             SplitDriverError::SerializeError
         })?;
+        let head_len = if used.len() > 16 { 16 } else { used.len() };
+        info!(
+            "[split peri] serialized len={} head={:?}",
+            used.len(),
+            &used[..head_len]
+        );
         info!("Writing split message to central: {:?}", message);
+        // Debug: send a fixed pattern for key press to verify BLE payload integrity on central.
+        if matches!(message, SplitMessage::Key(key) if key.pressed) {
+            let mut pattern = [0u8; SPLIT_MESSAGE_MAX_SIZE];
+            for (i, b) in pattern.iter_mut().enumerate() {
+                *b = (i as u8).wrapping_mul(3).wrapping_add(0xA5);
+            }
+            info!("[split peri] debug pattern head={:?}", &pattern[..16]);
+            self.message_to_central.notify(self.conn, &pattern).await.map_err(|e| {
+                error!("BLE notify error (pattern): {:?}", e);
+                SplitDriverError::BleError(1)
+            })?;
+        }
         self.message_to_central.notify(self.conn, &buf).await.map_err(|e| {
             error!("BLE notify error: {:?}", e);
             SplitDriverError::BleError(1)
