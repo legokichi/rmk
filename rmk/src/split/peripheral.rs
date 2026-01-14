@@ -125,8 +125,12 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                     }
                 },
                 embassy_futures::select::Either3::Second(e) => {
-                    // Only send the key event if the connection is established
-                    if CONNECTION_STATE.load(core::sync::atomic::Ordering::Acquire) {
+                    #[cfg(feature = "_ble")]
+                    let can_send = true;
+                    #[cfg(not(feature = "_ble"))]
+                    let can_send = CONNECTION_STATE.load(core::sync::atomic::Ordering::Acquire);
+                    // For BLE split, don't gate on host connection state.
+                    if can_send {
                         debug!("Writing split key event to central");
                         self.split_driver.write(&SplitMessage::Key(e)).await.ok();
                     } else {
@@ -134,7 +138,11 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                     }
                 }
                 embassy_futures::select::Either3::Third(e) => {
-                    if CONNECTION_STATE.load(core::sync::atomic::Ordering::Acquire) {
+                    #[cfg(feature = "_ble")]
+                    let can_send = true;
+                    #[cfg(not(feature = "_ble"))]
+                    let can_send = CONNECTION_STATE.load(core::sync::atomic::Ordering::Acquire);
+                    if can_send {
                         debug!("Writing split event to central: {:?}", e);
                         self.split_driver.write(&SplitMessage::Event(e)).await.ok();
                     } else {
