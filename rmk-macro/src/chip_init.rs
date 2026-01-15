@@ -170,7 +170,8 @@ pub(crate) fn chip_init_default(keyboard_config: &KeyboardTomlConfig, peripheral
                     let spi = ::cyw43_pio::PioSpi::new(
                         &mut pio.common,
                         pio.sm0,
-                        ::cyw43_pio::DEFAULT_CLOCK_DIVIDER,
+                        // Slow down SPI clock to avoid RP2350 input timing issues.
+                        ::cyw43_pio::RM2_CLOCK_DIVIDER * 2,
                         pio.irq0,
                         cs,
                         p.PIN_24,
@@ -184,6 +185,146 @@ pub(crate) fn chip_init_default(keyboard_config: &KeyboardTomlConfig, peripheral
                     spawner.spawn(cyw43_task(runner)).unwrap();
                     control.init(clm).await;
 
+                    // Log HCI traffic (raw bytes) for debugging BLE split transport.
+                    struct Cyw43LogTransport<T>(T);
+                    impl<T> Cyw43LogTransport<T> {
+                        fn new(inner: T) -> Self {
+                            Self(inner)
+                        }
+                    }
+                    impl<T: ::embedded_io::ErrorType> ::embedded_io::ErrorType for Cyw43LogTransport<T> {
+                        type Error = T::Error;
+                    }
+                    struct HciBufWriter<'a> {
+                        buf: &'a mut [u8],
+                        len: usize,
+                        truncated: bool,
+                    }
+                    impl<'a> HciBufWriter<'a> {
+                        fn new(buf: &'a mut [u8]) -> Self {
+                            Self {
+                                buf,
+                                len: 0,
+                                truncated: false,
+                            }
+                        }
+                        fn len(&self) -> usize {
+                            self.len
+                        }
+                        fn truncated(&self) -> bool {
+                            self.truncated
+                        }
+                    }
+                    impl<'a> ::embedded_io::ErrorType for HciBufWriter<'a> {
+                        type Error = ::core::convert::Infallible;
+                    }
+                    impl<'a> ::embedded_io::Write for HciBufWriter<'a> {
+                        fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+                            let remaining = self.buf.len().saturating_sub(self.len);
+                            let to_copy = core::cmp::min(remaining, buf.len());
+                            if to_copy > 0 {
+                                self.buf[self.len..self.len + to_copy].copy_from_slice(&buf[..to_copy]);
+                                self.len += to_copy;
+                            }
+                            if to_copy < buf.len() {
+                                self.truncated = true;
+                            }
+                            Ok(buf.len())
+                        }
+                        fn flush(&mut self) -> Result<(), Self::Error> {
+                            Ok(())
+                        }
+                    }
+                    impl<T> ::bt_hci::transport::Transport for Cyw43LogTransport<T>
+                    where
+                        T: ::bt_hci::transport::Transport,
+                        T::Error: ::core::fmt::Debug,
+                    {
+                        async fn read<'a>(&self, rx: &'a mut [u8]) -> Result<::bt_hci::ControllerToHostPacket<'a>, Self::Error> {
+                            let pkt = self.0.read(rx).await?;
+                            let mut buf = [0u8; 128];
+                            let mut idx = 0;
+                            buf[idx] = pkt.kind() as u8;
+                            idx += 1;
+                            match &pkt {
+                                ::bt_hci::ControllerToHostPacket::Acl(p) => {
+                                    let handle = p.handle().raw()
+                                        | ((p.boundary_flag() as u16) << 12)
+                                        | ((p.broadcast_flag() as u16) << 14);
+                                    let data = p.data();
+                                    buf[idx..idx + 2].copy_from_slice(&handle.to_le_bytes());
+                                    idx += 2;
+                                    buf[idx..idx + 2].copy_from_slice(&(data.len() as u16).to_le_bytes());
+                                    idx += 2;
+                                    let to_copy = core::cmp::min(data.len(), buf.len().saturating_sub(idx));
+                                    buf[idx..idx + to_copy].copy_from_slice(&data[..to_copy]);
+                                    idx += to_copy;
+                                }
+                                ::bt_hci::ControllerToHostPacket::Event(p) => {
+                                    let data = p.data;
+                                    buf[idx] = p.kind.0;
+                                    idx += 1;
+                                    buf[idx] = data.len() as u8;
+                                    idx += 1;
+                                    let to_copy = core::cmp::min(data.len(), buf.len().saturating_sub(idx));
+                                    buf[idx..idx + to_copy].copy_from_slice(&data[..to_copy]);
+                                    idx += to_copy;
+                                }
+                                ::bt_hci::ControllerToHostPacket::Sync(p) => {
+                                    let handle = p.handle().raw() | ((p.status() as u16) << 12);
+                                    let data = p.data();
+                                    buf[idx..idx + 2].copy_from_slice(&handle.to_le_bytes());
+                                    idx += 2;
+                                    buf[idx] = data.len() as u8;
+                                    idx += 1;
+                                    let to_copy = core::cmp::min(data.len(), buf.len().saturating_sub(idx));
+                                    buf[idx..idx + to_copy].copy_from_slice(&data[..to_copy]);
+                                    idx += to_copy;
+                                }
+                                ::bt_hci::ControllerToHostPacket::Iso(p) => {
+                                    let has_ts = p
+                                        .data_load_header()
+                                        .map(|h| h.timestamp.is_some())
+                                        .unwrap_or(false);
+                                    let handle = p.handle().raw()
+                                        | ((p.boundary_flag() as u16) << 12)
+                                        | ((has_ts as u16) << 14);
+                                    let data = p.data();
+                                    buf[idx..idx + 2].copy_from_slice(&handle.to_le_bytes());
+                                    idx += 2;
+                                    buf[idx..idx + 2].copy_from_slice(&(data.len() as u16).to_le_bytes());
+                                    idx += 2;
+                                    let to_copy = core::cmp::min(data.len(), buf.len().saturating_sub(idx));
+                                    buf[idx..idx + to_copy].copy_from_slice(&data[..to_copy]);
+                                    idx += to_copy;
+                                }
+                            }
+                            let bytes = ::defmt::Debug2Format(&buf[..idx]);
+                            ::defmt::info!("[cyw43 hci] rx kind={:?} len={} bytes={:?}", pkt.kind(), idx, bytes);
+                            Ok(pkt)
+                        }
+                        async fn write<P: ::bt_hci::HostToControllerPacket>(&self, val: &P) -> Result<(), Self::Error> {
+                            let mut buf = [0u8; 128];
+                            buf[0] = P::KIND as u8;
+                            let mut writer = HciBufWriter::new(&mut buf[1..]);
+                            let _ = val.write_hci(&mut writer);
+                            let used = 1 + writer.len();
+                            let truncated = writer.truncated();
+                            ::core::mem::drop(writer);
+                            let bytes = ::defmt::Debug2Format(&buf[..used]);
+                            ::defmt::info!(
+                                "[cyw43 hci] tx kind={:?} total={} logged={} truncated={} bytes={:?}",
+                                P::KIND,
+                                1 + val.size(),
+                                used,
+                                truncated,
+                                bytes
+                            );
+                            self.0.write(val).await
+                        }
+                    }
+
+                    let bt_device = Cyw43LogTransport::new(bt_device);
                     let controller: ::bt_hci::controller::ExternalController<_, 10> = ::bt_hci::controller::ExternalController::new(bt_device);
                     let ble_addr = #ble_addr;
                     let mut host_resources = ::rmk::HostResources::new();
