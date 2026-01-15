@@ -185,6 +185,7 @@ pub(crate) fn chip_init_default(keyboard_config: &KeyboardTomlConfig, peripheral
                     let (_net_device, bt_device, mut control, runner) = ::cyw43::new_with_bluetooth(state, pwr, spi, fw, btfw).await;
                     spawner.spawn(cyw43_task(runner)).unwrap();
                     control.init(clm).await;
+
                     let controller: ::bt_hci::controller::ExternalController<_, 10> = ::bt_hci::controller::ExternalController::new(bt_device);
                     let ble_addr = #ble_addr;
                     let mut host_resources = ::rmk::HostResources::new();
