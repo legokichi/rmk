@@ -380,6 +380,11 @@ async fn run_peripheral_manager<
             )
             .await?;
         info!("Message to central found");
+        info!(
+            "[split central] message_to_central handle=0x{:x} cccd=0x{:x}",
+            message_to_central.handle,
+            message_to_central.cccd_handle.unwrap_or(0)
+        );
         let message_to_peripheral = client
             .characteristic_by_uuid::<[u8; SPLIT_MESSAGE_MAX_SIZE]>(
                 service,
@@ -437,7 +442,10 @@ impl<'a, 'b, 'c, C: Controller + ControllerCmdAsync<LeSetPhy>, P: PacketPool> Sp
 {
     async fn read(&mut self) -> Result<SplitMessage, SplitDriverError> {
         let data = self.listener.next().await;
-        let message = postcard::from_bytes(data.as_ref()).map_err(|_| SplitDriverError::DeserializeError)?;
+        let raw = data.as_ref();
+        let head_len = core::cmp::min(5, raw.len());
+        info!("[split central] raw head={:?}", &raw[..head_len]);
+        let message = postcard::from_bytes(raw).map_err(|_| SplitDriverError::DeserializeError)?;
         info!("Received split message: {:?}", message);
 
         // Update last activity time when receiving key events from peripheral

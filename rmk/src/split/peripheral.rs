@@ -129,6 +129,7 @@ impl<S: SplitWriter + SplitReader> SplitPeripheral<S> {
                     let can_send = true;
                     #[cfg(not(feature = "_ble"))]
                     let can_send = CONNECTION_STATE.load(core::sync::atomic::Ordering::Acquire);
+                    info!("[split peri] key_event={:?} can_send={}", e, can_send);
                     // For BLE split, don't gate on host connection state.
                     if can_send {
                         debug!("Writing split key event to central");
