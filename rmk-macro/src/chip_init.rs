@@ -170,7 +170,8 @@ pub(crate) fn chip_init_default(keyboard_config: &KeyboardTomlConfig, peripheral
                     let spi = ::cyw43_pio::PioSpi::new(
                         &mut pio.common,
                         pio.sm0,
-                        // Slow down SPI clock to avoid RP2350 input timing issues.
+                        // RP2350 (Pico 2 W) PIO input timing is tighter; using a slower
+                        // SPI divider avoids corrupted CYW43 payloads (pressed bit flips).
                         ::cyw43_pio::RM2_CLOCK_DIVIDER * 2,
                         pio.irq0,
                         cs,
