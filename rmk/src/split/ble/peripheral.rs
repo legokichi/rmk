@@ -116,40 +116,7 @@ impl<'stack, 'server, 'c, P: PacketPool> SplitWriter for BleSplitPeripheralDrive
             error!("Postcard serialize split message error: {}", e);
             SplitDriverError::SerializeError
         })?;
-        let head_len = core::cmp::min(5, buf.len());
-        info!("[split peri] raw head={:?}", &buf[..head_len]);
         info!("Writing split message to central: {:?}", message);
-        let bytes = defmt::Debug2Format(&buf);
-        info!(
-            "[split peri] notify handle=0x{:x} len={} bytes={:?}",
-            self.message_to_central.handle,
-            buf.len(),
-            bytes
-        );
-        if let SplitMessage::Key(key) = message {
-            if let crate::event::KeyboardEventPos::Key(pos) = key.pos {
-                info!(
-                    "[cyw43 hci] key notify pressed={} row={} col={}",
-                    key.pressed,
-                    pos.row,
-                    pos.col
-                );
-            } else {
-                info!("[cyw43 hci] key notify pressed={}", key.pressed);
-            }
-        }
-        // Debug: send a fixed pattern for key press to verify BLE payload integrity on central.
-        if matches!(message, SplitMessage::Key(key) if key.pressed) {
-            let mut pattern = [0u8; SPLIT_MESSAGE_MAX_SIZE];
-            for (i, b) in pattern.iter_mut().enumerate() {
-                *b = (i as u8).wrapping_mul(3).wrapping_add(0xA5);
-            }
-            info!("[split peri] debug pattern head={:?}", &pattern[..16]);
-            self.message_to_central.notify(self.conn, &pattern).await.map_err(|e| {
-                error!("BLE notify error (pattern): {:?}", e);
-                SplitDriverError::BleError(1)
-            })?;
-        }
         self.message_to_central.notify(self.conn, &buf).await.map_err(|e| {
             error!("BLE notify error: {:?}", e);
             SplitDriverError::BleError(1)

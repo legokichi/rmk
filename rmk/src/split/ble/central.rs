@@ -442,10 +442,7 @@ impl<'a, 'b, 'c, C: Controller + ControllerCmdAsync<LeSetPhy>, P: PacketPool> Sp
 {
     async fn read(&mut self) -> Result<SplitMessage, SplitDriverError> {
         let data = self.listener.next().await;
-        let raw = data.as_ref();
-        let head_len = core::cmp::min(5, raw.len());
-        info!("[split central] raw head={:?}", &raw[..head_len]);
-        let message = postcard::from_bytes(raw).map_err(|_| SplitDriverError::DeserializeError)?;
+        let message = postcard::from_bytes(data.as_ref()).map_err(|_| SplitDriverError::DeserializeError)?;
         info!("Received split message: {:?}", message);
 
         // Update last activity time when receiving key events from peripheral
