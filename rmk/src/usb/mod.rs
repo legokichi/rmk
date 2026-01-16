@@ -242,9 +242,7 @@ impl Handler for UsbDeviceHandler {
     fn enabled(&mut self, enabled: bool) {
         if enabled {
             info!("Device enabled");
-            // Signal only after the host configures the device.
-            // BLE advertising is gated on USB_ENABLED, and signaling too early
-            // can suppress advertising while USB is still enumerating.
+            USB_ENABLED.signal(());
         } else {
             info!("Device disabled");
             if USB_ENABLED.signaled() {
@@ -265,8 +263,6 @@ impl Handler for UsbDeviceHandler {
     fn configured(&mut self, configured: bool) {
         if configured {
             CONNECTION_STATE.store(ConnectionState::Connected.into(), Ordering::Release);
-            // Host configuration is the point where USB is actually usable,
-            // so advertise BLE only after this signal on Pico 2 W.
             USB_ENABLED.signal(());
             info!("Device configured, it may now draw up to the configured current from Vbus.")
         } else {
